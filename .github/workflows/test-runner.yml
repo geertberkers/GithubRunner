@@ -1,0 +1,20 @@
+name: Test Self-Hosted Runner
+
+on:
+  workflow_dispatch:   # Allows manual trigger from GitHub UI
+  push:
+    branches:
+      - main         # Or any branch you want to test
+
+jobs:
+  test-runner:
+    runs-on: [self-hosted, Windows, X64]   # Must match your runner labels
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Print hostname
+        run: hostname
+
+      - name: Run a test script
+        run: echo "Hello from self-hosted runner!"
