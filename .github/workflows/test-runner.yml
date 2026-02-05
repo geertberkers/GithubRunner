@@ -8,80 +8,71 @@ on:
 
 jobs:
   test-runner:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: [self-hosted, linux, wsl]   # use labels you set
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Print hostname
         run: hostname
-        shell: cmd
 
       - name: Run a test script
-        run: echo Hello from self-hosted runner!
-        shell: cmd
+        run: echo "Hello from self-hosted Linux runner!"
 
-      - name: Kubectl get pods
-        run: kubectl get pods
-        shell: cmd
-
-      # ---- Build Nginx Webapp on Windows ----
+      # ---- Build Nginx Webapp ----
       - name: Create simple Nginx webapp
         run: |
-          mkdir webapp
-          echo ^<html^>^<body^>^<h1>Hello from Nginx on Kubernetes!^</h1^>^</body^>^</html^> > webapp\index.html
-          echo FROM nginx:alpine > webapp\Dockerfile
-          echo COPY index.html /usr/share/nginx/html/index.html >> webapp\Dockerfile
-        shell: cmd
+          mkdir -p webapp
+          echo '<!DOCTYPE html><html><body><h1>Hello from Nginx on Kubernetes!</h1></body></html>' > webapp/index.html
+          echo 'FROM nginx:alpine' > webapp/Dockerfile
+          echo 'COPY index.html /usr/share/nginx/html/index.html' >> webapp/Dockerfile
 
       - name: Build Nginx image with nerdctl
-        run: nerdctl.exe build -t my-nginx:latest .\webapp
-        shell: cmd
+        run: nerdctl build -t my-nginx:latest ./webapp
 
       - name: Push image to local registry (optional)
         run: |
-          nerdctl.exe tag my-nginx:latest localhost:5000/my-nginx:latest
-          nerdctl.exe push localhost:5000/my-nginx:latest
-        shell: cmd
+          nerdctl tag my-nginx:latest localhost:5000/my-nginx:latest
+          nerdctl push localhost:5000/my-nginx:latest
 
       - name: Apply Kubernetes deployment
         run: |
-          echo apiVersion: apps/v1 > webapp\nginx-deployment.yaml
-          echo kind: Deployment >> webapp\nginx-deployment.yaml
-          echo metadata: >> webapp\nginx-deployment.yaml
-          echo.  name: nginx-deployment >> webapp\nginx-deployment.yaml
-          echo spec: >> webapp\nginx-deployment.yaml
-          echo.  replicas: 1 >> webapp\nginx-deployment.yaml
-          echo.  selector: >> webapp\nginx-deployment.yaml
-          echo.    matchLabels: >> webapp\nginx-deployment.yaml
-          echo.      app: nginx >> webapp\nginx-deployment.yaml
-          echo.  template: >> webapp\nginx-deployment.yaml
-          echo.    metadata: >> webapp\nginx-deployment.yaml
-          echo.      labels: >> webapp\nginx-deployment.yaml
-          echo.        app: nginx >> webapp\nginx-deployment.yaml
-          echo.    spec: >> webapp\nginx-deployment.yaml
-          echo.      containers: >> webapp\nginx-deployment.yaml
-          echo.      - name: nginx >> webapp\nginx-deployment.yaml
-          echo.        image: localhost:5000/my-nginx:latest >> webapp\nginx-deployment.yaml
-          echo.        ports: >> webapp\nginx-deployment.yaml
-          echo.        - containerPort: 80 >> webapp\nginx-deployment.yaml
-          echo --- >> webapp\nginx-deployment.yaml
-          echo apiVersion: v1 >> webapp\nginx-deployment.yaml
-          echo kind: Service >> webapp\nginx-deployment.yaml
-          echo metadata: >> webapp\nginx-deployment.yaml
-          echo.  name: nginx-service >> webapp\nginx-deployment.yaml
-          echo spec: >> webapp\nginx-deployment.yaml
-          echo.  selector: >> webapp\nginx-deployment.yaml
-          echo.    app: nginx >> webapp\nginx-deployment.yaml
-          echo.  ports: >> webapp\nginx-deployment.yaml
-          echo.  - protocol: TCP >> webapp\nginx-deployment.yaml
-          echo.    port: 80 >> webapp\nginx-deployment.yaml
-          echo.    targetPort: 80 >> webapp\nginx-deployment.yaml
-          echo.  type: LoadBalancer >> webapp\nginx-deployment.yaml
+          cat <<EOF > webapp/nginx-deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx-deployment
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: localhost:5000/my-nginx:latest
+                    ports:
+                      - containerPort: 80
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx-service
+          spec:
+            selector:
+              app: nginx
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 80
+            type: LoadBalancer
+          EOF
 
-          kubectl.exe apply -f webapp\nginx-deployment.yaml
-        shell: cmd
+          kubectl apply -f webapp/nginx-deployment.yaml
 
       - name: Verify deployment
-        run: kubectl.exe get all
-        shell: cmd
+        run: kubectl get all
