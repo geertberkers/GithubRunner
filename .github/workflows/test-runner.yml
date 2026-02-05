@@ -21,21 +21,35 @@ jobs:
         run: echo "Hello from self-hosted Linux runner!"
 
       # ---- START BUILDKIT (REQUIRED FOR NERDCTL) ----
-      - name: Start BuildKit (rootless)
+      # ---- START BUILDKIT (FIXED FOR WSL) ----
+      - name: Start BuildKit daemon
         run: |
           export XDG_RUNTIME_DIR=/run/user/$(id -u)
           mkdir -p $XDG_RUNTIME_DIR
 
-          nohup buildkitd-rootless.sh \
-            --addr unix:///run/user/$(id -u)/buildkit-default/buildkitd.sock \
+          # Start buildkitd in background
+          buildkitd \
+            --addr unix://$XDG_RUNTIME_DIR/buildkitd.sock \
             > /tmp/buildkit.log 2>&1 &
 
-          sleep 3
+          # Wait until socket exists
+          for i in {1..10}; do
+            if [ -S "$XDG_RUNTIME_DIR/buildkitd.sock" ]; then
+              echo "BuildKit is running"
+              break
+            fi
+            echo "Waiting for BuildKit..."
+            sleep 1
+          done
+
+          # Hard fail if still not running
+          test -S "$XDG_RUNTIME_DIR/buildkitd.sock"
 
       - name: Configure BuildKit for nerdctl
         run: |
-          echo "BUILDKIT_HOST=unix:///run/user/$(id -u)/buildkit-default/buildkitd.sock" >> $GITHUB_ENV
+          echo "BUILDKIT_HOST=unix://$XDG_RUNTIME_DIR/buildkitd.sock" >> $GITHUB_ENV
       # ---- END BUILDKIT ----
+
 
       # ---- Build Nginx Webapp ----
       - name: Create simple Nginx webapp
