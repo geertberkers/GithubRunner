@@ -3,75 +3,58 @@ name: Test Self-Hosted Runner
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  test-runner:
+  build-and-deploy:
     runs-on: [self-hosted, linux, wsl]
+
+    env:
+      BUILDKIT_HOST: unix:///run/buildkit/buildkitd.sock
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Print hostname
-        run: hostname
-
-      - name: Run a test script
-        run: echo "Hello from self-hosted Linux runner!"
-
-      # ---- START BUILDKIT (REQUIRED FOR NERDCTL) ----
-      # ---- START BUILDKIT (FIXED FOR WSL) ----
-      - name: Start BuildKit daemon
+      - name: System sanity check
         run: |
-          export XDG_RUNTIME_DIR=/run/user/$(id -u)
-          mkdir -p $XDG_RUNTIME_DIR
-
-          # Start buildkitd in background
-          buildkitd \
-            --addr unix://$XDG_RUNTIME_DIR/buildkitd.sock \
-            > /tmp/buildkit.log 2>&1 &
-
-          # Wait until socket exists
-          for i in {1..10}; do
-            if [ -S "$XDG_RUNTIME_DIR/buildkitd.sock" ]; then
-              echo "BuildKit is running"
-              break
-            fi
-            echo "Waiting for BuildKit..."
-            sleep 1
-          done
-
-          # Hard fail if still not running
-          test -S "$XDG_RUNTIME_DIR/buildkitd.sock"
-
-      - name: Configure BuildKit for nerdctl
-        run: |
-          echo "BUILDKIT_HOST=unix://$XDG_RUNTIME_DIR/buildkitd.sock" >> $GITHUB_ENV
-      # ---- END BUILDKIT ----
-
+          hostname
+          nerdctl version
+          buildctl --version
+          kubectl version --client
 
       # ---- Build Nginx Webapp ----
-      - name: Create simple Nginx webapp
+      - name: Prepare Nginx webapp
         run: |
+          rm -rf webapp
           mkdir -p webapp
-          echo '<!DOCTYPE html><html><body><h1>Hello from Nginx on Kubernetes!</h1></body></html>' > webapp/index.html
+
+          cat <<EOF > webapp/index.html
+          <!DOCTYPE html>
+          <html>
+            <body>
+              <h1>Hello from Nginx on Kubernetes 🚀</h1>
+            </body>
+          </html>
+          EOF
+
           cat <<EOF > webapp/Dockerfile
           FROM nginx:alpine
           COPY index.html /usr/share/nginx/html/index.html
           EOF
 
-      - name: Build Nginx image with nerdctl
+      - name: Build image with nerdctl
         run: nerdctl build -t my-nginx:latest ./webapp
 
-      - name: Push image to local registry (optional)
+      - name: Push image to local registry
         run: |
           nerdctl tag my-nginx:latest localhost:5000/my-nginx:latest
           nerdctl push localhost:5000/my-nginx:latest
 
-      - name: Apply Kubernetes deployment
+      # ---- Deploy to Kubernetes ----
+      - name: Deploy Nginx
         run: |
-          cat <<EOF > webapp/nginx-deployment.yaml
+          kubectl apply -f - <<EOF
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -87,10 +70,10 @@ jobs:
                   app: nginx
               spec:
                 containers:
-                  - name: nginx
-                    image: localhost:5000/my-nginx:latest
-                    ports:
-                      - containerPort: 80
+                - name: nginx
+                  image: localhost:5000/my-nginx:latest
+                  ports:
+                  - containerPort: 80
           ---
           apiVersion: v1
           kind: Service
@@ -100,13 +83,18 @@ jobs:
             selector:
               app: nginx
             ports:
-              - protocol: TCP
-                port: 80
-                targetPort: 80
-            type: LoadBalancer
+            - port: 80
+              targetPort: 80
           EOF
 
-          kubectl apply -f webapp/nginx-deployment.yaml
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/nginx-deployment --timeout=60s
 
-      - name: Verify deployment
-        run: kubectl get all
+      - name: Verify Nginx is running
+        run: |
+          kubectl get pods -l app=nginx
+          kubectl get svc nginx-service
+
+          POD=$(kubectl get pods -l app=nginx -o jsonpath='{.items[0].metadata.name}')
+          kubectl exec "$POD" -- wget -qO- http://localhost:80
