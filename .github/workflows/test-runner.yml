@@ -24,3 +24,68 @@ jobs:
       - name: Kubectl get pods
         run: kubectl get pods
         shell: cmd
+
+      # ---- Build Nginx Webapp with nerdctl ----
+      - name: Create simple Nginx webapp
+        run: |
+          mkdir -p webapp
+          echo "<!DOCTYPE html><html><body><h1>Hello from Nginx on Kubernetes!</h1></body></html>" > webapp/index.html
+          echo "FROM nginx:alpine
+          COPY index.html /usr/share/nginx/html/index.html" > webapp/Dockerfile
+        shell: bash
+
+      - name: Build Nginx image with nerdctl
+        run: |
+          nerdctl build -t my-nginx:latest ./webapp
+        shell: bash
+
+      - name: Push image to local registry (optional)
+        run: |
+          # Example for local registry at localhost:5000
+          nerdctl tag my-nginx:latest localhost:5000/my-nginx:latest
+          nerdctl push localhost:5000/my-nginx:latest
+        shell: bash
+
+      - name: Apply Kubernetes deployment
+        run: |
+          echo "
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx-deployment
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: localhost:5000/my-nginx:latest
+                    ports:
+                      - containerPort: 80
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx-service
+          spec:
+            selector:
+              app: nginx
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 80
+            type: LoadBalancer
+          " > webapp/nginx-deployment.yaml
+
+          kubectl apply -f webapp/nginx-deployment.yaml
+        shell: bash
+
+      - name: Verify deployment
+        run: kubectl get all
+        shell: bash
