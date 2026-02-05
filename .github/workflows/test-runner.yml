@@ -8,7 +8,8 @@ on:
 
 jobs:
   test-runner:
-    runs-on: [self-hosted, linux, wsl]   # use labels you set
+    runs-on: [self-hosted, linux, wsl]
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -19,13 +20,32 @@ jobs:
       - name: Run a test script
         run: echo "Hello from self-hosted Linux runner!"
 
+      # ---- START BUILDKIT (REQUIRED FOR NERDCTL) ----
+      - name: Start BuildKit (rootless)
+        run: |
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          mkdir -p $XDG_RUNTIME_DIR
+
+          nohup buildkitd-rootless.sh \
+            --addr unix:///run/user/$(id -u)/buildkit-default/buildkitd.sock \
+            > /tmp/buildkit.log 2>&1 &
+
+          sleep 3
+
+      - name: Configure BuildKit for nerdctl
+        run: |
+          echo "BUILDKIT_HOST=unix:///run/user/$(id -u)/buildkit-default/buildkitd.sock" >> $GITHUB_ENV
+      # ---- END BUILDKIT ----
+
       # ---- Build Nginx Webapp ----
       - name: Create simple Nginx webapp
         run: |
           mkdir -p webapp
           echo '<!DOCTYPE html><html><body><h1>Hello from Nginx on Kubernetes!</h1></body></html>' > webapp/index.html
-          echo 'FROM nginx:alpine' > webapp/Dockerfile
-          echo 'COPY index.html /usr/share/nginx/html/index.html' >> webapp/Dockerfile
+          cat <<EOF > webapp/Dockerfile
+          FROM nginx:alpine
+          COPY index.html /usr/share/nginx/html/index.html
+          EOF
 
       - name: Build Nginx image with nerdctl
         run: nerdctl build -t my-nginx:latest ./webapp
