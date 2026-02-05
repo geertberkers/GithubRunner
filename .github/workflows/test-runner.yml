@@ -20,3 +20,7 @@ jobs:
       - name: Run a test script
         run: echo Hello from self-hosted runner!
         shell: cmd
+
+      - name: Kubectl get pods
+        run: kubectl get pods
+        shell: cmd
